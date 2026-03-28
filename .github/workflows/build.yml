@@ -1,0 +1,342 @@
+name: Build gRPC
+
+on:
+  workflow_dispatch:
+    inputs:
+      grpc_version:
+        description: 'gRPC version (e.g. 1.78.1)'
+        required: true
+        default: '1.78.1'
+
+env:
+  GRPC_VERSION: ${{ github.event.inputs.grpc_version }}
+
+jobs:
+  #
+  # ── Linux x86_64 ──────────────────────────────────────────────────────────────
+  #
+  linux-x86_64:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: '⚙️ Install build dependencies'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build \
+            autoconf libtool pkg-config
+
+      - name: '📥 Clone gRPC'
+        run: |
+          git clone --depth 1 -b v${{ env.GRPC_VERSION }} \
+            https://github.com/grpc/grpc.git grpc-src
+          cd grpc-src
+          git submodule update --init --depth 1
+
+      - name: '🚧 Build gRPC'
+        run: |
+          cmake -B build -S grpc-src -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/grpc-install \
+            -DCMAKE_CXX_STANDARD=20 \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DgRPC_INSTALL=ON \
+            -DgRPC_BUILD_TESTS=OFF \
+            -DgRPC_BUILD_CSHARP_EXT=OFF \
+            -DgRPC_BUILD_GRPC_CSHARP_PLUGIN=OFF \
+            -DgRPC_BUILD_GRPC_NODE_PLUGIN=OFF \
+            -DgRPC_BUILD_GRPC_OBJECTIVE_C_PLUGIN=OFF \
+            -DgRPC_BUILD_GRPC_PHP_PLUGIN=OFF \
+            -DgRPC_BUILD_GRPC_PYTHON_PLUGIN=OFF \
+            -DgRPC_BUILD_GRPC_RUBY_PLUGIN=OFF \
+            -DBUILD_SHARED_LIBS=OFF
+          cmake --build build -j $(nproc)
+          cmake --install build
+
+      - name: '📦 Package'
+        run: |
+          tar -czf grpc-${{ env.GRPC_VERSION }}-linux-x86_64.tar.gz \
+            -C ${{ github.workspace }}/grpc-install .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: grpc-linux-x86_64
+          path: grpc-${{ env.GRPC_VERSION }}-linux-x86_64.tar.gz
+
+  #
+  # ── Linux aarch64 (cross-compile) ────────────────────────────────────────────
+  #
+  linux-aarch64:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: '⚙️ Install build dependencies'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build \
+            autoconf libtool pkg-config \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: '📥 Clone gRPC'
+        run: |
+          git clone --depth 1 -b v${{ env.GRPC_VERSION }} \
+            https://github.com/grpc/grpc.git grpc-src
+          cd grpc-src
+          git submodule update --init --depth 1
+
+      - name: '🚧 Build host tools (protoc + grpc_cpp_plugin)'
+        run: |
+          cmake -B build-host -S grpc-src -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/grpc-host \
+            -DgRPC_INSTALL=ON \
+            -DgRPC_BUILD_TESTS=OFF \
+            -DgRPC_BUILD_CSHARP_EXT=OFF \
+            -DgRPC_BUILD_GRPC_CSHARP_PLUGIN=OFF \
+            -DgRPC_BUILD_GRPC_NODE_PLUGIN=OFF \
+            -DgRPC_BUILD_GRPC_OBJECTIVE_C_PLUGIN=OFF \
+            -DgRPC_BUILD_GRPC_PHP_PLUGIN=OFF \
+            -DgRPC_BUILD_GRPC_PYTHON_PLUGIN=OFF \
+            -DgRPC_BUILD_GRPC_RUBY_PLUGIN=OFF \
+            -DBUILD_SHARED_LIBS=OFF
+          cmake --build build-host -j $(nproc) --target grpc_cpp_plugin
+          cmake --build build-host -j $(nproc) --target protoc
+
+      - name: '📝 Create cross-compile toolchain'
+        run: |
+          cat > aarch64-toolchain.cmake << 'TOOLCHAIN'
+          set(CMAKE_SYSTEM_NAME Linux)
+          set(CMAKE_SYSTEM_PROCESSOR aarch64)
+          set(CMAKE_C_COMPILER aarch64-linux-gnu-gcc)
+          set(CMAKE_CXX_COMPILER aarch64-linux-gnu-g++)
+          set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+          set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+          set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+          set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
+          TOOLCHAIN
+
+      - name: '🚧 Cross-compile gRPC for aarch64'
+        run: |
+          HOST_PROTOC=${{ github.workspace }}/build-host/third_party/protobuf/protoc
+          HOST_PLUGIN=${{ github.workspace }}/build-host/grpc_cpp_plugin
+          cmake -B build -S grpc-src -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/grpc-install \
+            -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/aarch64-toolchain.cmake \
+            -DCMAKE_CXX_STANDARD=20 \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DgRPC_INSTALL=ON \
+            -DgRPC_BUILD_TESTS=OFF \
+            -DgRPC_BUILD_CSHARP_EXT=OFF \
+            -DgRPC_BUILD_CODEGEN=OFF \
+            -DgRPC_BUILD_GRPC_CSHARP_PLUGIN=OFF \
+            -DgRPC_BUILD_GRPC_NODE_PLUGIN=OFF \
+            -DgRPC_BUILD_GRPC_OBJECTIVE_C_PLUGIN=OFF \
+            -DgRPC_BUILD_GRPC_PHP_PLUGIN=OFF \
+            -DgRPC_BUILD_GRPC_PYTHON_PLUGIN=OFF \
+            -DgRPC_BUILD_GRPC_RUBY_PLUGIN=OFF \
+            -DBUILD_SHARED_LIBS=OFF \
+            -D_gRPC_CPP_PLUGIN=$HOST_PLUGIN \
+            -DProtobuf_PROTOC_EXECUTABLE=$HOST_PROTOC
+          cmake --build build -j $(nproc)
+          cmake --install build
+
+      - name: '📦 Package'
+        run: |
+          tar -czf grpc-${{ env.GRPC_VERSION }}-linux-aarch64.tar.gz \
+            -C ${{ github.workspace }}/grpc-install .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: grpc-linux-aarch64
+          path: grpc-${{ env.GRPC_VERSION }}-linux-aarch64.tar.gz
+
+  #
+  # ── macOS Universal (arm64 + x86_64) ─────────────────────────────────────────
+  #
+  macos-universal:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: '⚙️ Install build dependencies'
+        run: brew install cmake ninja autoconf automake libtool
+
+      - name: '📥 Clone gRPC'
+        run: |
+          git clone --depth 1 -b v${{ env.GRPC_VERSION }} \
+            https://github.com/grpc/grpc.git grpc-src
+          cd grpc-src
+          git submodule update --init --depth 1
+
+      - name: '🚧 Build gRPC (arm64)'
+        run: |
+          cmake -B build-arm64 -S grpc-src -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/grpc-arm64 \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            -DCMAKE_CXX_STANDARD=20 \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DgRPC_INSTALL=ON \
+            -DgRPC_BUILD_TESTS=OFF \
+            -DgRPC_BUILD_CSHARP_EXT=OFF \
+            -DgRPC_BUILD_GRPC_CSHARP_PLUGIN=OFF \
+            -DgRPC_BUILD_GRPC_NODE_PLUGIN=OFF \
+            -DgRPC_BUILD_GRPC_OBJECTIVE_C_PLUGIN=OFF \
+            -DgRPC_BUILD_GRPC_PHP_PLUGIN=OFF \
+            -DgRPC_BUILD_GRPC_PYTHON_PLUGIN=OFF \
+            -DgRPC_BUILD_GRPC_RUBY_PLUGIN=OFF \
+            -DBUILD_SHARED_LIBS=OFF
+          cmake --build build-arm64 -j $(sysctl -n hw.ncpu)
+          cmake --install build-arm64
+
+      - name: '🚧 Build gRPC (x86_64)'
+        run: |
+          cmake -B build-x86_64 -S grpc-src -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/grpc-x86_64 \
+            -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            -DCMAKE_CXX_STANDARD=20 \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DgRPC_INSTALL=ON \
+            -DgRPC_BUILD_TESTS=OFF \
+            -DgRPC_BUILD_CSHARP_EXT=OFF \
+            -DgRPC_BUILD_GRPC_CSHARP_PLUGIN=OFF \
+            -DgRPC_BUILD_GRPC_NODE_PLUGIN=OFF \
+            -DgRPC_BUILD_GRPC_OBJECTIVE_C_PLUGIN=OFF \
+            -DgRPC_BUILD_GRPC_PHP_PLUGIN=OFF \
+            -DgRPC_BUILD_GRPC_PYTHON_PLUGIN=OFF \
+            -DgRPC_BUILD_GRPC_RUBY_PLUGIN=OFF \
+            -DBUILD_SHARED_LIBS=OFF
+          cmake --build build-x86_64 -j $(sysctl -n hw.ncpu)
+          cmake --install build-x86_64
+
+      - name: '🔗 Create universal binaries'
+        run: |
+          # Start with arm64 as base (copies headers, cmake configs, etc.)
+          cp -R ${{ github.workspace }}/grpc-arm64 ${{ github.workspace }}/grpc-install
+
+          # Lipo all static libraries
+          find ${{ github.workspace }}/grpc-arm64/lib -name '*.a' | while read arm_lib; do
+            rel_path="${arm_lib#${{ github.workspace }}/grpc-arm64/}"
+            x86_lib="${{ github.workspace }}/grpc-x86_64/$rel_path"
+            out_lib="${{ github.workspace }}/grpc-install/$rel_path"
+            if [ -f "$x86_lib" ]; then
+              lipo -create "$arm_lib" "$x86_lib" -output "$out_lib"
+            fi
+          done
+
+          # Lipo executables (protoc, grpc_cpp_plugin, etc.)
+          find ${{ github.workspace }}/grpc-arm64/bin -type f | while read arm_bin; do
+            rel_path="${arm_bin#${{ github.workspace }}/grpc-arm64/}"
+            x86_bin="${{ github.workspace }}/grpc-x86_64/$rel_path"
+            out_bin="${{ github.workspace }}/grpc-install/$rel_path"
+            if [ -f "$x86_bin" ]; then
+              lipo -create "$arm_bin" "$x86_bin" -output "$out_bin" 2>/dev/null || true
+            fi
+          done
+
+          # Verify a sample library is universal
+          echo "Verifying universal binary:"
+          lipo -info ${{ github.workspace }}/grpc-install/lib/libgrpc++.a
+
+      - name: '📦 Package'
+        run: |
+          tar -czf grpc-${{ env.GRPC_VERSION }}-macos-universal.tar.gz \
+            -C ${{ github.workspace }}/grpc-install .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: grpc-macos-universal
+          path: grpc-${{ env.GRPC_VERSION }}-macos-universal.tar.gz
+
+  #
+  # ── Windows x86_64 (MSVC 2022) ───────────────────────────────────────────────
+  #
+  windows-x86_64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: TheMrMilchmann/setup-msvc-dev@v4
+        with:
+          arch: x64
+
+      - name: '📥 Clone gRPC'
+        run: |
+          git clone --depth 1 -b v${{ env.GRPC_VERSION }} `
+            https://github.com/grpc/grpc.git grpc-src
+          cd grpc-src
+          git submodule update --init --depth 1
+
+      - name: '🚧 Build gRPC'
+        run: |
+          cmake -B build -S grpc-src `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/grpc-install" `
+            -DCMAKE_CXX_STANDARD=20 `
+            -DCMAKE_C_COMPILER=cl `
+            -DCMAKE_CXX_COMPILER=cl `
+            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
+            -DgRPC_INSTALL=ON `
+            -DgRPC_BUILD_TESTS=OFF `
+            -DgRPC_BUILD_CSHARP_EXT=OFF `
+            -DgRPC_BUILD_GRPC_CSHARP_PLUGIN=OFF `
+            -DgRPC_BUILD_GRPC_NODE_PLUGIN=OFF `
+            -DgRPC_BUILD_GRPC_OBJECTIVE_C_PLUGIN=OFF `
+            -DgRPC_BUILD_GRPC_PHP_PLUGIN=OFF `
+            -DgRPC_BUILD_GRPC_PYTHON_PLUGIN=OFF `
+            -DgRPC_BUILD_GRPC_RUBY_PLUGIN=OFF `
+            -DBUILD_SHARED_LIBS=OFF `
+            -DCMAKE_POLICY_DEFAULT_CMP0091=NEW
+          cmake --build build --config Release -j 16
+          cmake --install build --config Release
+
+      - name: '📦 Package'
+        run: |
+          cd "${{ github.workspace }}/grpc-install"
+          7z a "${{ github.workspace }}/grpc-${{ env.GRPC_VERSION }}-windows-x86_64.zip" *
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: grpc-windows-x86_64
+          path: grpc-${{ env.GRPC_VERSION }}-windows-x86_64.zip
+
+  #
+  # ── Create GitHub Release ─────────────────────────────────────────────────────
+  #
+  release:
+    needs: [linux-x86_64, linux-aarch64, macos-universal, windows-x86_64]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: '📋 List artifacts'
+        run: ls -lh artifacts/
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.GRPC_VERSION }}
+          name: gRPC ${{ env.GRPC_VERSION }}
+          body: |
+            Pre-built static gRPC **${{ env.GRPC_VERSION }}** libraries.
+
+            | Archive | Platform | Arch | Compiler |
+            |---------|----------|------|----------|
+            | `grpc-${{ env.GRPC_VERSION }}-linux-x86_64.tar.gz` | Linux | x86_64 | GCC (system) |
+            | `grpc-${{ env.GRPC_VERSION }}-linux-aarch64.tar.gz` | Linux | aarch64 | GCC cross-compiler |
+            | `grpc-${{ env.GRPC_VERSION }}-macos-universal.tar.gz` | macOS | arm64 + x86_64 | Apple Clang |
+            | `grpc-${{ env.GRPC_VERSION }}-windows-x86_64.zip` | Windows | x86_64 | MSVC 2022 (v193) |
+
+            All builds: C++20, static libraries, Release mode.
+            macOS: universal binaries (arm64 + x86_64), deployment target 11.0.
+            Windows: static MSVC runtime (`/MT`).
+          files: artifacts/*
