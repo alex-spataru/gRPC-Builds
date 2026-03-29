@@ -294,7 +294,7 @@ jobs:
             | Archive | Platform | Arch | Compiler |
             |---------|----------|------|----------|
             | `grpc-${{ env.GRPC_VERSION }}-linux-x86_64.tar.gz` | Linux | x86_64 | GCC (system) |
-            | `grpc-${{ env.GRPC_VERSION }}-linux-aarch64.tar.gz` | Linux | aarch64 | GCC cross-compiler |
+            | `grpc-${{ env.GRPC_VERSION }}-linux-aarch64.tar.gz` | Linux | aarch64 | GCC |
             | `grpc-${{ env.GRPC_VERSION }}-macos-universal.tar.gz` | macOS | arm64 + x86_64 | Apple Clang |
             | `grpc-${{ env.GRPC_VERSION }}-windows-x86_64.zip` | Windows | x86_64 | MSVC 2022 (v193) |
 

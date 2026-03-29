@@ -1,13 +1,15 @@
 # gRPC Pre-built Binaries
 
-Pre-built static gRPC C++ libraries for use in CI pipelines.
+[![Build gRPC](https://github.com/alex-spataru/gRPC-Builds/actions/workflows/build.yml/badge.svg)](https://github.com/alex-spataru/gRPC-Builds/actions/workflows/build.yml)
+
+Pre-built static gRPC C++ libraries for Linux, macOS & Windows. Drop them into your CI pipeline and skip the 30+ minute build-from-source step.
 
 ## Platforms
 
 | Archive | Platform | Arch | Compiler |
 |---------|----------|------|----------|
 | `grpc-{ver}-linux-x86_64.tar.gz` | Linux | x86_64 | GCC |
-| `grpc-{ver}-linux-aarch64.tar.gz` | Linux | aarch64 | GCC cross-compiler |
+| `grpc-{ver}-linux-aarch64.tar.gz` | Linux | aarch64 | GCC |
 | `grpc-{ver}-macos-universal.tar.gz` | macOS | arm64 + x86_64 | Apple Clang |
 | `grpc-{ver}-windows-x86_64.zip` | Windows | x86_64 | MSVC 2022 (v193) |
 
