@@ -64,10 +64,10 @@ jobs:
           path: grpc-${{ env.GRPC_VERSION }}-linux-x86_64.tar.gz
 
   #
-  # ── Linux aarch64 (cross-compile) ────────────────────────────────────────────
+  # ── Linux aarch64 (native) ───────────────────────────────────────────────────
   #
   linux-aarch64:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
 
@@ -75,8 +75,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake ninja-build \
-            autoconf libtool pkg-config \
-            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+            autoconf libtool pkg-config
 
       - name: '📥 Clone gRPC'
         run: |
@@ -85,11 +84,13 @@ jobs:
           cd grpc-src
           git submodule update --init --depth 1
 
-      - name: '🚧 Build host tools (protoc + grpc_cpp_plugin)'
+      - name: '🚧 Build gRPC'
         run: |
-          cmake -B build-host -S grpc-src -G Ninja \
+          cmake -B build -S grpc-src -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/grpc-host \
+            -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/grpc-install \
+            -DCMAKE_CXX_STANDARD=20 \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DgRPC_INSTALL=ON \
             -DgRPC_BUILD_TESTS=OFF \
             -DgRPC_BUILD_CSHARP_EXT=OFF \
@@ -100,45 +101,6 @@ jobs:
             -DgRPC_BUILD_GRPC_PYTHON_PLUGIN=OFF \
             -DgRPC_BUILD_GRPC_RUBY_PLUGIN=OFF \
             -DBUILD_SHARED_LIBS=OFF
-          cmake --build build-host -j $(nproc) --target grpc_cpp_plugin
-          cmake --build build-host -j $(nproc) --target protoc
-
-      - name: '📝 Create cross-compile toolchain'
-        run: |
-          cat > aarch64-toolchain.cmake << 'TOOLCHAIN'
-          set(CMAKE_SYSTEM_NAME Linux)
-          set(CMAKE_SYSTEM_PROCESSOR aarch64)
-          set(CMAKE_C_COMPILER aarch64-linux-gnu-gcc)
-          set(CMAKE_CXX_COMPILER aarch64-linux-gnu-g++)
-          set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
-          set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
-          set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
-          set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
-          TOOLCHAIN
-
-      - name: '🚧 Cross-compile gRPC for aarch64'
-        run: |
-          HOST_PROTOC=${{ github.workspace }}/build-host/third_party/protobuf/protoc
-          HOST_PLUGIN=${{ github.workspace }}/build-host/grpc_cpp_plugin
-          cmake -B build -S grpc-src -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/grpc-install \
-            -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/aarch64-toolchain.cmake \
-            -DCMAKE_CXX_STANDARD=20 \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-            -DgRPC_INSTALL=ON \
-            -DgRPC_BUILD_TESTS=OFF \
-            -DgRPC_BUILD_CSHARP_EXT=OFF \
-            -DgRPC_BUILD_CODEGEN=OFF \
-            -DgRPC_BUILD_GRPC_CSHARP_PLUGIN=OFF \
-            -DgRPC_BUILD_GRPC_NODE_PLUGIN=OFF \
-            -DgRPC_BUILD_GRPC_OBJECTIVE_C_PLUGIN=OFF \
-            -DgRPC_BUILD_GRPC_PHP_PLUGIN=OFF \
-            -DgRPC_BUILD_GRPC_PYTHON_PLUGIN=OFF \
-            -DgRPC_BUILD_GRPC_RUBY_PLUGIN=OFF \
-            -DBUILD_SHARED_LIBS=OFF \
-            -D_gRPC_CPP_PLUGIN=$HOST_PLUGIN \
-            -DProtobuf_PROTOC_EXECUTABLE=$HOST_PROTOC
           cmake --build build -j $(nproc)
           cmake --install build
 
